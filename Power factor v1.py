@@ -7,7 +7,7 @@ import math
 GLOBAL_date_column_name ="meter_id"# "Date (Period Beginning)" #
 GLOBAL_AI_column_suffix = "-AI" #"-AI"
 GLOBAL_RI_column_suffix = "-RI"
-GLOBAL_RE_column_suffix = ""
+GLOBAL_RE_column_suffix = "-RE"
 GLOBAL_output_statistics= ["Meter code", "Max kWh","Date Max kWh", "Load factor", "Contracted MIC",\
                              "Max kVA","Date Max kVA","kVA 95% quantile", "Average PF",\
                              "Standard deviation PF", "Min PF", "Max PF", "Demand chargeable kVArh", \
@@ -17,12 +17,11 @@ GLOBAL_PF_multiplier = "C:\\Users\\GJ5356\\Documents\\Work\\06 - Reporting\\02 -
 
 def open_and_clean(path):
     data = pd.read_csv(path, encoding='utf-8', header=1)
-    print(data.head())
+    #print(data.head())
     data.drop(0, axis=0, inplace=True) # "timestamp"
-    data.set_index(pd.to_datetime(data[GLOBAL_date_column_name], format="%Y-%m-%d  %H:%M:%S"), inplace=True) #format="%d/%m/%Y  %H:%M")
+    data.set_index(pd.to_datetime(data[GLOBAL_date_column_name], format="%Y-%m-%d  %H:%M:%S"), inplace=True)
     data.fillna(value=0, axis=1, inplace=True)
     data["month"]= data.index.month
-
     contract = Contract(os.path.splitext(path)[0], siteParameters(GLOBAL_parameters))
     contract._add_batch_sites(listMeters(data.columns), data)
     contract._export_statistics_csv()
@@ -84,11 +83,26 @@ class Contract:
                 mic=0
                 price1=0
                 price2=0
-            if not GLOBAL_RE_column_suffix:
-                #print("no RE")
-                self._add_site(metercode,data.loc[:, ["month", metercode+GLOBAL_AI_column_suffix, metercode+GLOBAL_RI_column_suffix]],mic, price1, price2)
+                
+            if metercode+GLOBAL_RI_column_suffix not in data.columns.values and metercode+GLOBAL_RE_column_suffix not in data.columns.values:
+                print("no RI/RE "+metercode)
+                tmpData = data.loc[:, ["month", metercode+GLOBAL_AI_column_suffix]]
+                tmpData["RI"]=0
+                tmpData["RE"]=0
+            
+            elif metercode+GLOBAL_RI_column_suffix not in data.columns.values:
+                print("no RI "+metercode)
+                tmpData = data.loc[:, ["month", metercode+GLOBAL_AI_column_suffix, metercode+GLOBAL_RE_column_suffix]]
+                tmpData["RI"]=0
+            elif metercode+GLOBAL_RE_column_suffix not in data.columns.values:
+                print("no RE "+metercode)
+                tmpData = data.loc[:, ["month", metercode+GLOBAL_AI_column_suffix, metercode+GLOBAL_RI_column_suffix]]
+                tmpData["RE"]=0
             else:
-                self._add_site(metercode,data.loc[:, ["month", metercode+GLOBAL_AI_column_suffix, metercode+GLOBAL_RI_column_suffix, metercode+GLOBAL_RE_column_suffix]],mic, price1, price2)
+                tmpData = data.loc[:, ["month", metercode+GLOBAL_AI_column_suffix, metercode+GLOBAL_RI_column_suffix, metercode+GLOBAL_RE_column_suffix]]
+            
+            tmpData.columns=["month", "AI", "RI", "RE"]
+            self._add_site(metercode,tmpData,mic, price1, price2)
 
     def _add_site(self, metercode, data, MIC,price1, price2):
         self.list_sites[metercode] = Site(metercode, data, MIC, price1, price2, self.PFmultiplier)     
@@ -105,7 +119,7 @@ class Contract:
 
         result = pd.concat(frames, axis=1, keys=keys)
 
-        result.to_csv("result.csv")
+        result.to_csv(self.name+"_fulldata.csv")
     
             
     def _export_statistics_csv(self):
@@ -117,7 +131,7 @@ class Contract:
             frames.append(values)
 
         result = pd.DataFrame(frames, columns= GLOBAL_output_statistics)
-        result.to_csv("result_statistics.csv", index=False)
+        result.to_csv(self.name+ "_statistics.csv", index=False)
         
 class Site:
     """ 
@@ -131,7 +145,7 @@ class Site:
         self.data = data
         self.MIC = MIC
         self.PFmultiplier = PFmultiplier
-        self._rename_columns()
+        #self._rename_columns()
         self._apparent_power()
         self._power_factor()
         self._demand_chargeable()  
@@ -184,6 +198,8 @@ class Site:
         return statistics_dict
    
     def _rename_columns(self):
+               
+        self.data.fillna(0, inplace=True)
         if self.data.shape[1]==3: #There is no RE in the dataset. An empty column for future calculation
             self.data["RE"]=0
             
@@ -213,14 +229,9 @@ class Site:
         
 
 start_time = time.time()        
-path="DS Smith.csv" #"C:\\Users\\GJ5356\\Documents\\Work\\02 - c3ntinel\\01 - Clients\\06 - Sanofi\\data2015.csv"
+path="data.csv"
 
 open_and_clean(path)
 
-#multiplier = pd.read_csv(GLOBAL_PF_multiplier, index_col=0)
-#
-#print(multiplier.columns)
-#print(multiplier.index)
-#print(multiplier.loc[0.90, "0.95" ])
 
 print("--- %s seconds ---" % (time.time() - start_time))
